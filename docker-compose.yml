@@ -1,0 +1,97 @@
+version: '3'
+
+networks:
+  default:
+  proxy:
+    external: true
+
+volumes:
+  mysql:
+
+services:
+  traefik:
+    image: traefik:1.7.30
+    container_name: traefik
+    command: --docker
+    ports:
+      - '80:80'
+      - '443:443'
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./build/traefik/traefik.toml:/traefik.toml
+      - ./build/traefik/.certs:/certs
+    networks:
+      - proxy
+    labels:
+      - 'traefik.frontend.rule=Host:monitor.localhost'
+      - 'traefik.port=8080'
+
+  web:
+    build: build/builds/web
+    container_name: ${PROJECT_NAME}_web
+    restart: unless-stopped
+    volumes:
+      - ./:/var/www/html:cached
+    labels:
+      - "traefik.frontend.rule=Host:${PROJECT_HOSTNAME},www.${PROJECT_HOSTNAME}"
+      - "traefik.docker.network=proxy"
+    networks:
+      - proxy
+      - default
+    env_file:
+      - .env
+
+  mysql:
+    image: mysql:5.7
+    container_name: ${PROJECT_NAME}_mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${APP_DB_PASS}
+      MYSQL_DATABASE: ${APP_DB_NAME}
+      MYSQL_USER: ${APP_DB_USER}
+      MYSQL_PASSWORD: ${APP_DB_PASS}
+    command: ['mysqld', '--character-set-server=${APP_DB_CHARSET}', '--collation-server=${APP_DB_COLLATION}']
+    ports:
+      - "${APP_DB_PORT}:3306"
+    volumes:
+      - mysql:/var/lib/mysql:cached
+    networks:
+      - default
+
+  phpmyadmin:
+    image: nazarpc/phpmyadmin
+    restart: unless-stopped
+    container_name: ${PROJECT_NAME}_phpmyadmin
+    labels:
+      - "traefik.frontend.rule=Host:pma.${PROJECT_HOSTNAME}"
+      - "traefik.docker.network=proxy"
+    environment:
+      UPLOAD_SIZE: 1G
+    networks:
+      - proxy
+      - default
+
+  mailhog:
+    image: mailhog/mailhog
+    restart: unless-stopped
+    container_name: ${PROJECT_NAME}_mailhog
+    labels:
+      - "traefik.frontend.rule=Host:mailhog.${PROJECT_HOSTNAME}"
+      - "traefik.port=8025"
+      - "traefik.docker.network=proxy"
+    ports:
+      - "1025:1025"
+    networks:
+      - proxy
+      - default
+
+  ngrok:
+    image: shkoliar/ngrok:latest
+    ports:
+      - 4551:4551
+    links:
+      - web
+    environment:
+      - DOMAIN=web
+      - PORT=80
+      - REGION=eu
